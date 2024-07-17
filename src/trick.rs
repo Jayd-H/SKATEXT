@@ -47,8 +47,10 @@ pub struct Shuv {
 
 #[derive(Debug)]
 pub struct Trick {
+    boneless: bool,
     turn: Option<Turn>,
     stance: Stance,
+    impossible: bool,
     shuv: Option<Shuv>,
     flip: Option<FlipType>,
     catch: Option<CatchType>,
@@ -59,8 +61,10 @@ impl Trick {
     pub fn parse(input: &str) -> Result<Self, String> {
         let lowercase_input = input.to_lowercase();
         let components: Vec<&str> = lowercase_input.split_whitespace().collect();
+        let mut boneless = false;
         let mut turn: Option<Turn> = None;
         let mut stance: Option<Stance> = None;
+        let mut impossible = false;
         let mut shuv: Option<Shuv> = None;
         let mut flip: Option<FlipType> = None;
         let mut catch: Option<CatchType> = None;
@@ -71,6 +75,13 @@ impl Trick {
         let mut i = 0;
         while i < components.len() {
             match components[i] {
+                "boneless" => {
+                    if i != 0 {
+                        return Err("Boneless must be at the start of the trick".to_string());
+                    }
+                    boneless = true;
+                    i += 1;
+                }
                 "fs" | "bs" => {
                     if i + 1 < components.len() {
                         match components[i + 1] {
@@ -92,14 +103,14 @@ impl Trick {
                                     }
                                     shuv = Some(Shuv { direction, angle });
                                     used_modifiers.insert("shuv");
-                                    i += 2;
+                                    i += 3;
                                 } else {
                                     if used_modifiers.contains("turn") {
                                         return Err("Only one turn modifier allowed".to_string());
                                     }
                                     turn = Some(Turn { direction, angle });
                                     used_modifiers.insert("turn");
-                                    i += 1;
+                                    i += 2;
                                 }
                             }
                             _ => {
@@ -124,6 +135,15 @@ impl Trick {
                         _ => unreachable!(),
                     });
                     used_modifiers.insert("stance");
+                    i += 1;
+                }
+                "impossible" => {
+                    if used_modifiers.contains("impossible") {
+                        return Err("Only one impossible allowed".to_string());
+                    }
+                    impossible = true;
+                    used_modifiers.insert("impossible");
+                    i += 1;
                 }
                 "heelflip" | "kickflip" => {
                     if used_modifiers.contains("flip") {
@@ -135,6 +155,7 @@ impl Trick {
                         FlipType::Kickflip
                     });
                     used_modifiers.insert("flip");
+                    i += 1;
                 }
                 "north" | "south" => {
                     if used_modifiers.contains("catch") {
@@ -146,25 +167,33 @@ impl Trick {
                         CatchType::South
                     });
                     used_modifiers.insert("catch");
+                    i += 1;
                 }
                 "revert" => {
                     if revert {
                         return Err("Only one revert allowed".to_string());
                     }
                     revert = true;
+                    i += 1;
                 }
                 _ => return Err(format!("Unknown component: {}", components[i])),
             }
-            i += 1;
         }
 
         // ensure a stance is provided
         let stance = stance
             .ok_or_else(|| "A stance (ollie, nollie, fakie, or switch) is required".to_string())?;
 
+        // validate impossible trick constraints
+        if impossible && (shuv.is_some() || flip.is_some() || catch.is_some() || revert) {
+            return Err("Impossible tricks can only have a turn modifier".to_string());
+        }
+
         Ok(Trick {
+            boneless,
             turn,
             stance,
+            impossible,
             shuv,
             flip,
             catch,
@@ -175,11 +204,13 @@ impl Trick {
     pub fn calculate_chance(&self) -> f64 {
         let mut base_chance = 1.0;
         let modifiers = [
+            (self.boneless, 1.05),
             (matches!(self.stance, Stance::Ollie), 0.95),
             (matches!(self.stance, Stance::Nollie), 0.9),
             (matches!(self.stance, Stance::Switch), 0.7),
             (matches!(self.stance, Stance::Fakie), 0.9),
             (self.turn.is_some(), 0.9),
+            (self.impossible, 0.6), // Impossibles are harder to land
             (self.shuv.is_some(), 0.9),
             (self.flip.is_some(), 0.7),
             (self.catch.is_some(), 0.8),
@@ -219,11 +250,19 @@ impl std::fmt::Display for Trick {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut parts = Vec::new();
 
+        if self.boneless {
+            parts.push("Boneless".to_string());
+        }
+
         if let Some(Turn { direction, angle }) = &self.turn {
             parts.push(format!("{:?} {:?}", direction, angle));
         }
 
         parts.push(format!("{:?}", self.stance));
+
+        if self.impossible {
+            parts.push("Impossible".to_string());
+        }
 
         if let Some(Shuv { direction, angle }) = &self.shuv {
             parts.push(format!("{:?} {:?} shuv", direction, angle));
